@@ -5,12 +5,16 @@
 volatile uint16_t sample_value;
 volatile uint16_t histogram[NUM_CODES] = {0};
 volatile uint16_t sample_count = 0;
+volatile uint16_t samples[NUM_SAMPLES];
 
 volatile int PC13_state = 0;
 volatile int PC14_state = 0;
 
 volatile int finished_sampling = 0;
 volatile int data_sent = 0;
+
+volatile float sum_samples = 0.0;
+volatile float sum_samples_sq = 0.0;
 
 /* Function declarations */
 static void Clock_Init(void);
@@ -25,9 +29,13 @@ void ADC1_2_IRQHandler(void)
 	{
 		sample_value = ADC1->DR & ADC_DR_DATA;
 		histogram[sample_value]++;
+		samples[sample_count] = sample_value;
 		sample_count++;
 		if(NUM_SAMPLES == sample_count)
 			finished_sampling = 1;
+
+		sum_samples += ((float)sample_value)/NUM_SAMPLES;
+		sum_samples_sq += ((float)(sample_value*sample_value))/NUM_SAMPLES;
 	}
 }
 
@@ -46,7 +54,7 @@ int main(void)
 		// Emulating ADC Sampling clock
 		if(!finished_sampling)
 		{
-			for(volatile int i=0; i<50000; i++);
+			for(volatile int i=0; i<200000; i++);
 			PC14_toggle();
 		}
 
@@ -54,11 +62,21 @@ int main(void)
 		if(finished_sampling && !data_sent)
 		{
 			USART1_EnableTx();
+			/*
 			for(int i=0; i<NUM_CODES; i++)
 			{
 				USART1_Tx_int(histogram[i]);
 				USART1_Tx_string("\r\n");
 			}
+			USART1_Tx_string("Samples\r\n");*/
+			for(int i=0; i<NUM_SAMPLES; i++)
+			{
+				USART1_Tx_int(samples[i]);
+				USART1_Tx_string("\r\n");
+			}
+			USART1_Tx_string("Variance ");
+			USART1_Tx_float(sum_samples_sq - sum_samples*sum_samples);
+
 			USART1_DisableTx();
 			SET_BIT(GPIOC->BSRR, GPIO_BSRR_BS14);
 			data_sent = 1;
@@ -163,7 +181,6 @@ static void ADC1_Init(void)
 	SET_BIT(ADC1->CR1, ADC_CR1_EOCIE);
 	NVIC_EnableIRQ(ADC1_2_IRQn);
 	NVIC_SetPriority(ADC1_2_IRQn, 0);
-	__enable_irq();
 
 	/* Enabling ADC1 */
 	SET_BIT(ADC1->CR2, ADC_CR2_ADON);
